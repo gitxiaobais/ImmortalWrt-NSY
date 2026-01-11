@@ -1,4 +1,4 @@
-name: ImmortalWrt-g16
+name: ImmortalWrt-g16_350R
 
 on:
   workflow_dispatch:
@@ -103,12 +103,13 @@ jobs:
         echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
         echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_OUTPUT
 
-    - name: Install Feeds
+    - name: Install Feeds (修复：适配仓库根目录feeds脚本)
       run: |
         df -hT
         cd $OPENWRT_PATH
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        # 关键修改：移除scripts/目录，直接执行根目录的feeds脚本（适配gitxiaobais/ImmortalWrt-NSY仓库）
+        ./feeds update -a
+        ./feeds install -a
 
     - name: Generate Variables
       id: variable
