@@ -1,4 +1,4 @@
-name: ImmortalWrt-g16_350R
+name: ImmortalWrt-g16rw350r
 
 on:
   workflow_dispatch:
@@ -6,18 +6,15 @@ on:
     - cron: 0 20 * * *
 
 env:
-  # 替换为目标源码仓库（适配你的需求）
-  REPO_URL: https://github.com/gitxiaobais/ImmortalWrt-NSY
+  REPO_URL: https://github.com/zhoufuli/immortalwrt-rk356x
   REPO_BRANCH: main
-  # 适配G16+联发科RW350R 5G模块（MBIM协议）的配置文件路径
-  CONFIG_FILE: configs/g16-rw350r-5g-mbim.config
+  CONFIG_FILE: configs/g16-plus-docker.config
   DIY_SCRIPT: diy-mini.sh
   CLASH_KERNEL: arm64
   CACHE_TOOLCHAIN: true
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  # 明确标记设备和5G模块（MBIM协议）
-  FIRMWARE_TAG: immortalwrt-g16-rw350r-5g-mbim
+  FIRMWARE_TAG: immortalwrt-g16
   TZ: Asia/Shanghai
   GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
 
@@ -81,7 +78,7 @@ jobs:
         sudo -E apt-get -y clean
         sudo timedatectl set-timezone "$TZ"
 
-    - name: Clone Source Code (NSY ImmortalWrt)
+    - name: Clone Source Code
       working-directory: ${{ env.WORKDIR }}/workdir
       id: clone
       run: |
@@ -103,20 +100,17 @@ jobs:
         echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
         echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_OUTPUT
 
-    - name: Install Feeds (修复：适配仓库根目录feeds脚本)
+    - name: Install Feeds
       run: |
         df -hT
         cd $OPENWRT_PATH
-        # 关键修改：移除scripts/目录，直接执行根目录的feeds脚本（适配gitxiaobais/ImmortalWrt-NSY仓库）
-        ./feeds update -a
-        ./feeds install -a
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
     - name: Generate Variables
       id: variable
       run: |
         df -hT
-        # 确保配置文件存在，否则创建默认配置（MBIM协议基础配置）
-        [ ! -e $CONFIG_FILE ] && mkdir -p $(dirname $CONFIG_FILE) && echo -e "CONFIG_TARGET_rockchip=y\nCONFIG_TARGET_rockchip_armv8=y\nCONFIG_TARGET_rockchip_armv8_DEVICE_nsy-g16=y\nCONFIG_PACKAGE_luci-proto-mbim=y" > $CONFIG_FILE
         cp $CONFIG_FILE $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
         make defconfig > /dev/null 2>&1
@@ -137,28 +131,26 @@ jobs:
         mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
         prefix: ${{ env.OPENWRT_PATH }}
 
-    - name: Load Custom Configuration (适配联发科RW350R 5G模块-MBIM协议)
+    - name: Load Custom Configuration
       run: |
         df -hT
         [ -e files ] && mv files $OPENWRT_PATH/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE $OPENWRT_PATH/.config
-        # 确保scripts目录存在（避免辅助脚本执行报错）
-        mkdir -p ${GITHUB_WORKSPACE}/scripts
-        chmod +x ${GITHUB_WORKSPACE}/scripts/*.sh 2>/dev/null || true
-        chmod +x $DIY_SCRIPT 2>/dev/null || true
+        chmod +x $GITHUB_WORKSPACE/scripts/*.sh
+        chmod +x $DIY_SCRIPT
         cd $OPENWRT_PATH
-        # 执行自定义脚本（若存在）
-        [ -f $GITHUB_WORKSPACE/$DIY_SCRIPT ] && $GITHUB_WORKSPACE/$DIY_SCRIPT || echo "未找到自定义脚本 $DIY_SCRIPT，跳过执行"
-        # 执行Clash核心预设（若scripts目录存在对应脚本）
-        [ -f $GITHUB_WORKSPACE/scripts/preset-clash-core.sh ] && $GITHUB_WORKSPACE/scripts/preset-clash-core.sh $CLASH_KERNEL || echo "未找到Clash预设脚本，跳过执行"
-        # 移除旧的QMI协议配置（联发科模组不需要）
-        sed -i '/CONFIG_PACKAGE_luci-proto-qmi/d' .config
-        sed -i '/CONFIG_PACKAGE_uqmi/d' .config
-        sed -i '/CONFIG_PACKAGE_qmi-utils/d' .config
-        # 启用联发科RW350R 5G模块必要依赖（MBIM协议兜底配置，防止.config遗漏）
+        $GITHUB_WORKSPACE/$DIY_SCRIPT
+        $GITHUB_WORKSPACE/scripts/preset-clash-core.sh $CLASH_KERNEL
+        # $GITHUB_WORKSPACE/scripts/preset-adguard-core.sh $CLASH_KERNEL
+        # ==============================================
+        # 仅新增：联发科RW350R 5G模组 MBIM协议支持（无其他改动）
+        # ==============================================
+        echo "添加RW350R模组MBIM协议支持"
         sed -i '/CONFIG_PACKAGE_luci-proto-mbim/d' .config && echo "CONFIG_PACKAGE_luci-proto-mbim=y" >> .config
         sed -i '/CONFIG_PACKAGE_kmod-usb-net-cdc-mbim/d' .config && echo "CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y" >> .config
         sed -i '/CONFIG_PACKAGE_kmod-usb-net-rndis/d' .config && echo "CONFIG_PACKAGE_kmod-usb-net-rndis=y" >> .config
+        sed -i '/CONFIG_PACKAGE_kmod-usb-serial-option/d' .config && echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+        sed -i '/CONFIG_PACKAGE_kmod-usb-serial-wwan/d' .config && echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
 
     - name: Download DL Package
       run: |
@@ -175,9 +167,7 @@ jobs:
         df -hT
         cd $OPENWRT_PATH
         mkdir -p files/etc/uci-defaults
-        # 初始化设置脚本（若不存在则创建简易版本）
-        [ -f $GITHUB_WORKSPACE/scripts/init-settings.sh ] && cp $GITHUB_WORKSPACE/scripts/init-settings.sh files/etc/uci-defaults/99-init-settings || echo -e "#!/bin/sh\nuci set system.@system[0].hostname='G16-5G-MBIM'\nuci commit system" > files/etc/uci-defaults/99-init-settings
-        chmod +x files/etc/uci-defaults/99-init-settings
+        cp $GITHUB_WORKSPACE/scripts/init-settings.sh files/etc/uci-defaults/99-init-settings
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -202,10 +192,10 @@ jobs:
         cd $OPENWRT_PATH/bin/targets/*/*
         cat sha256sums
         cp $OPENWRT_PATH/.config build.config
-        mv -f $OPENWRT_PATH/bin/packages/*/*/*.ipk packages 2>/dev/null || true
-        [ -d packages ] && tar -zcf Packages.tar.gz packages && rm -rf packages
-        rm -rf feeds.buildinfo version.buildinfo
-        echo "KERNEL=$(cat *.manifest | grep ^kernel | cut -d- -f2 | tr -d ' ' 2>/dev/null || echo 'unknown')" >> $GITHUB_ENV
+        mv -f $OPENWRT_PATH/bin/packages/*/*/*.ipk packages
+        tar -zcf Packages.tar.gz packages
+        rm -rf packages feeds.buildinfo version.buildinfo
+        echo "KERNEL=$(cat *.manifest | grep ^kernel | cut -d- -f2 | tr -d ' ')" >> $GITHUB_ENV
         echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
     - name: Upload Firmware To Artifact
@@ -225,16 +215,15 @@ jobs:
         token: ${{ env.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }} (RK3568 4+128G + 联发科RW350R 5G)**
+          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
           ### 📒 固件信息
-          - 💻 平台架构: ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} (RK3568 arm64)
+          - 💻 平台架构: ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }} (rk33xx, rk35xx)
           - ⚽ 固件源码: ${{ env.REPO_URL }}
           - 💝 源码分支: ${{ env.REPO_BRANCH }}
           - 🚀 内核版本: ${{ env.KERNEL }}
           - 🌐 默认地址: 192.168.1.1
           - 🔑 默认密码: password
-          - 📶 5G模块: 适配联发科RW350R（已启用MBIM协议核心支持）
-          - 💾 存储配置: 适配128G大容量存储（根分区扩容）
+          - 📶 额外支持: 联发科RW350R 5G模组（MBIM协议）
           ### 🧊 固件版本
           - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
           - ${{ env.COMMIT_AUTHOR }}
