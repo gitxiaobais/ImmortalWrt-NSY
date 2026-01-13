@@ -103,5 +103,14 @@ chmod 755 package/base-files/files/bin/coremark.sh
 git clone --depth=1 https://github.com/sirpdboy/luci-app-eqosplus package/luci-app-eqosplus
 
 
+# 新增：添加联发科RW350R驱动源（必须在 feeds update 之前）
+echo "src-git mtk_t7xx https://github.com/immortalwrt/packages.git;openwrt-23.05/net/mtk-t7xx" >> feeds.conf.default
+
+
+# 现在执行 feeds 更新和安装（确保包含新增的驱动源）
 ./scripts/feeds update -a
 ./scripts/feeds install -a
+
+# 单独安装RW350R核心驱动（确保依赖生效）
+./scripts/feeds install -p mtk_t7xx mtk-t7xx
+
